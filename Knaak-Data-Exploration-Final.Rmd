@@ -1,0 +1,372 @@
+---
+title: "Data Exploration of 2015 Flight Data and TSA Claims"
+output:
+  html_document: default
+  html_notebook: default
+  df_print: paged
+  pdf_document: default
+  
+---
+
+```{r include=FALSE, cache=FALSE}
+library(scales)
+library(grid)
+library(RColorBrewer)
+
+library(tidyverse)
+library(lubridate) # Part of the Tidyverse to handle dates and times
+library(dplyr)
+
+library(readxl)
+library(stringr)
+library("ggpubr")
+library("readr")
+library("plotly")
+setwd(dir = "C:/Users/rknaa/Documents/datascience/dataexploration-final-project/")
+```
+# Flight Data
+```{r warning=FALSE}
+#small for testing 
+
+#totflights <- read_csv(file='totflights-small.csv')
+totflights <- read_csv(file='totflights.csv')
+
+
+#load("totflights.Rda")
+#structure(totflights)
+
+# mutate columns to factors, certain functions work with columns as factors
+totflights <-totflights %>% mutate(CARRIER = factor(CARRIER))
+totflights <-totflights %>% mutate(DEST_AIRPORT_ID = factor(DEST_AIRPORT_ID))
+totflights <-totflights %>% mutate(ORIGIN_AIRPORT_ID = factor(ORIGIN_AIRPORT_ID))
+totflights <-totflights %>% mutate(MONTH = factor(MONTH))
+
+#save(totflights,file="totflights.Rda")
+
+#save(totflights,file="totflights.Rda")
+#rm(totflights)
+
+#totflights
+```
+Summary of total flight data for 2015.
+```{r}
+summary(totflights)
+```
+
+```{r}
+# The main data from flights I am concerned about is Departure Delay 
+min(totflights$DEP_DELAY)
+
+# Let's find the mean departure delay
+mean(totflights$DEP_DELAY)
+
+#let's find the standard deviation
+sd(totflights$DEP_DELAY)
+
+#most departing flights by airport
+flight_count_by_airport <- totflights%>% group_by(ORIGIN_AIRPORT_ID) %>% summarise(count =n()) %>% arrange(desc(count))
+cat (toString(flight_count_by_airport$ORIGIN_AIRPORT_ID[1]), 'had the most flights with',flight_count_by_airport$count[1], 'flights.')
+
+#flight with the longest departure day
+longest_departure_delay <- totflights %>% arrange(desc(DEP_DELAY))
+#longest_departure_delay
+
+cat (toString(longest_departure_delay$ORIGIN_AIRPORT_ID[1]) , 'to',toString(longest_departure_delay$DEST_AIRPORT_ID[1]),'on',format(longest_departure_delay$FL_DATE[1],"%m-%d-%Y"),'had the longest delay of',longest_departure_delay$DEP_DELAY[1], 'minutes.')
+
+```
+
+
+Some basic visualizations of my data of interest.
+```{r}
+hist(totflights$DEP_DELAY)
+hist(totflights$ARR_DELAY)
+```
+
+
+Check for normality of Depature Delay or Arrival Delay
+
+```{r}
+#check for normality
+ggqqplot(totflights$DEP_DELAY, ylab = "Departure Delay",title='QQ Plot Departure Delay')
+ggqqplot(totflights$ARR_DELAY, ylab = "Arrival Delay",title='QQ Plot Arrival Delay')
+
+```
+
+```{r warning=FALSE}
+
+#A lot of airports with a small number of flights.  Sample size is going to be too small 
+
+# Let's try adding a filter so that only airports with more than 5,000 flights in a year are represented
+
+delaysbyairport <- totflights %>% group_by(ORIGIN_AIRPORT_ID) %>% summarise(count =n(),delay = mean(DEP_DELAY)) %>% filter(count > 5000) %>% arrange(desc(delay))
+
+
+#much better,  large airports and acceptable seeming delays
+
+#plot a slice of the dataframe to keep the chart sane
+
+delaysbyairport %>% slice(1:10)
+
+delayplot <-ggplot(data=delaysbyairport %>% slice(1:10), aes(x = ORIGIN_AIRPORT_ID, y = delay,fill=ORIGIN_AIRPORT_ID)) +
+  geom_bar(stat="identity") +
+  labs(title = "Highest Average Departure Delay 2015",
+       y = "Minutes",
+       x = "Airport") + theme_bw(base_size = 15)  + theme(legend.position="none", 
+                                                          panel.grid.major = element_blank(),
+                                                          panel.grid.minor = element_blank(),
+                                                          panel.border = element_blank(),
+                                                          panel.background = element_blank())
+
+delayplot
+
+
+```
+
+
+Now let's look at delays on a monthly basis
+```{r}
+#Let's look at delays per month
+
+head(totflights)
+
+months <-levels(totflights$MONTH)
+avg_delays_by_month=c()
+
+for(filtermonth in months){
+  #print(filtermonth)
+  temp_monthly_flights <- totflights %>% filter(MONTH == filtermonth) %>%  summarise(
+     TOT_ARR_DELAY = sum(ARR_DELAY), MEAN_ARR_DELAY = mean(ARR_DELAY),
+     TOT_DEP_DELAY = sum(DEP_DELAY), MEAN_DEP_DELAY = mean(DEP_DELAY), NUM_FLIGHTS  =(count=n())
+  )
+  temp_monthly_flights$month <- filtermonth
+  avg_delays_by_month <- bind_rows(avg_delays_by_month,temp_monthly_flights)
+  rm(temp_monthly_flights)
+}
+
+avg_delays_by_month %>% arrange(MEAN_DEP_DELAY)
+
+#Print the month with the most claims and the ammount
+
+cat (month.name[as.numeric(avg_delays_by_month$month[1])], 'had the shortest mean departure delay of',avg_delays_by_month$MEAN_DEP_DELAY[1], 'minutes.')
+
+cat (month.name[as.numeric(avg_delays_by_month$month[length(avg_delays_by_month$month)])], 'had the longest mean departure delay of',avg_delays_by_month$MEAN_DEP_DELAY[length(avg_delays_by_month$MEAN_DEP_DELAY)], 'minutes.')
+
+
+
+monthly_data <- data.frame(x <- month.abb[as.numeric(avg_delays_by_month$month)], y1 <-avg_delays_by_month$MEAN_DEP_DELAY, y2 <-avg_delays_by_month$MEAN_ARR_DELAY, y3 <-avg_delays_by_month$NUM_FLIGHTS)
+monthly_flights_plot <- plot_ly(monthly_data, x = ~x, y = ~y3, type = 'bar', name = 'Flights', marker = list(color = 'rgb(49,130,189)')) %>%
+  layout(title = "Number of Flights by Month",xaxis = list(title = "", tickangle = -45,categoryorder = "array",categoryarray = monthly_data$x),
+         yaxis = list(title = ""),
+         margin = list(b = 100),
+         barmode = 'group')
+
+monthly_flights_plot
+
+monthly_delays_plot <- plot_ly(monthly_data, x = ~x, y = ~y1, type = 'bar', name = 'Departure Delay', marker = list(color = 'rgb(49,130,189)')) %>%
+  add_trace(y = ~y2, name = 'Arrival Delay', marker = list(color = 'rgb(204,204,204)')) %>%
+  layout(title = "Mean Delays in Minutes",xaxis = list(title = "", tickangle = -45,categoryorder = "array",categoryarray = monthly_data$x),
+         yaxis = list(title = ""),
+         margin = list(b = 100),
+         barmode = 'group')
+
+monthly_delays_plot
+
+
+```
+
+
+
+
+
+#TSA Claims
+
+Next, I will explore the TSA Claims Data.
+Start by reading in the CSV data creating a column for just the month, and filtering for claims that occurred in 2015.
+```{r cache=FALSE}
+#Start by read the data from the CSV, columns are rename for convenience
+#TSA claims data
+claims<- read_excel('claims-data-2015-as-of-feb-9-2016.xlsx')
+
+colnames(claims)
+claims <- rename (claims, claimnumber = "Claim Number", datereceived ="Date Received",
+                  incidentd = "Incident D", airportcode = "Airport Code", airportname="Airport Name",
+                  airlinename = "Airline Name", claimtype="Claim Type", claimsite ="Claim Site",
+                  itemcategory = "Item Category", closeamount ="Close Amount", disposition = "Disposition")
+claims <- claims %>% mutate(yearmonth = format(incidentd, "%Y-%m"), year = format(incidentd, "%Y"),month = format(incidentd, "%m"))
+claims$month <- as.numeric(claims$month)
+
+claims <- claims %>% filter(year == '2015')
+```
+Summary of claims.
+```{r}
+summary(claims)
+```
+Basic visualizations
+```{r}
+hist(claims$month)
+#View(claims)
+```
+Why is January so high?
+Let's get a count by month.
+```{r}
+
+maxclaims <- claims %>% group_by(month) %>% summarize(count = n()) %>% arrange(desc(count))
+
+g <- ggplot(claims, aes(month)) 
+g + geom_bar(fill="#c0392b")+scale_x_continuous(breaks=claims$month,labels=paste(month.abb[claims$month])) +
+    labs(x="Month",title="Claims per month") 
+```
+
+```{r}
+#Print the month with the most claims and the amount
+
+cat (month.name[maxclaims$month[1]], 'had the most claims with',maxclaims$count[1], 'claims.')
+```
+
+```{r}
+# Let's make a dataframe of airport codes and claims count, and then make a bar chart.
+claimsbyairport <- claims %>% group_by(airportcode) %>% summarise(count =n()) %>% arrange(desc(count))
+#claimsbyairport
+
+# The main data from claimsbyairport I am concerned about is number of claims per airport 
+min(claimsbyairport$count)
+
+# Let's find the mean claims count 
+mean(claimsbyairport$count)
+
+#let's find the standard deviation
+sd(claimsbyairport$count)
+
+# Top ten claims count by airport
+claimsbyairport %>% slice(1:10)
+
+#plot a slice of the dataframe to keep the chart sane
+claimsplot <-ggplot(data=claimsbyairport %>% slice(1:10), aes(x = airportcode, y = count, fill= airportcode)) +
+  geom_bar(stat="identity") +
+  labs(title = "Top 10 Airports with most TSA Claims",
+       y = "Claims",
+       x = "Airport") + theme_bw(base_size = 15)  + theme(legend.position="none", panel.grid.major = element_blank(),
+                                                          panel.grid.minor = element_blank(),
+                                                          panel.border = element_blank(),
+                                                          panel.background = element_blank())
+claimsplot
+```
+
+#Combining the data sets
+```{r warning=FALSE}
+#There are a lot data points in the flight data set
+#I think we would do better with just totals for each airport for the year
+
+#Let's look at how many flights with delays there are for each Origin Airport, total delay time and mean delay time
+total_dep_delays_by_airport <- totflights %>%
+  group_by(ORIGIN_AIRPORT_ID) %>% filter(DEP_DELAY > 0) %>% summarise(TOT_DEP_DELAY = sum(DEP_DELAY), MEAN_DEP_DELAY = mean(DEP_DELAY), NUM_FLIGHTS  =(count=n()))
+  
+#Sanity check the results
+glimpse(total_dep_delays_by_airport)
+#total_dep_delays_by_airport
+
+
+summary(total_dep_delays_by_airport$TOT_DEP_DELAY)
+summary(total_dep_delays_by_airport$MEAN_DEP_DELAY)
+
+#now let's build a list of claims for each airport
+
+total_claims_by_airport = claims %>% group_by(airportcode) %>% summarise (total_claims = n())
+
+total_claims_by_airport
+
+
+# Join the flight data and claims data on airport code
+combined_claims_delay <- full_join(total_dep_delays_by_airport,total_claims_by_airport,by = c('ORIGIN_AIRPORT_ID' = 'airportcode'))
+
+
+
+```
+
+# Analysis of Combined Data Sets
+```{r}
+#Let's try to answer our initial research question
+#Is the number of TSa Claims at an airport corrolated to the the average delay time at that airport.
+
+combined_claims_delay <-combined_claims_delay %>% filter(total_claims > 1)  
+head(combined_claims_delay )
+
+res <- cor.test(combined_claims_delay$MEAN_DEP_DELAY, combined_claims_delay$total_claims, method = "pearson")
+print (res)
+```
+```{r}
+cat ('With a correlation coefficient of',res$estimate, 'and a p-value of',res$p.value)
+cat ('There is very weak negative correlation between TSA Claims and Mean Departure Delays' )
+```
+
+```{r warning=FALSE}
+ggscatter(combined_claims_delay, x = "total_claims", y = "MEAN_DEP_DELAY",
+          add = "reg.line", conf.int = TRUE,
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "TSA Claims", ylab = "Mean Departure Delay",
+          color='blue'
+)
+
+
+```
+
+#Addtional possible correlations
+
+Number of Flights as a predictor of TSA Claims
+```{r warning=FALSE}
+# Since we have all this data processed.  Let's look at addtional possible correlations
+
+# Join the flight data and claims data on airport code
+combined_claims_flight_count <- full_join(flight_count_by_airport,total_claims_by_airport,by = c('ORIGIN_AIRPORT_ID' = 'airportcode'))
+combined_claims_flight_count
+res <- cor.test(combined_claims_flight_count$total_claims, combined_claims_flight_count$count,method = "pearson")
+
+
+cat ('With a correlation coefficient of',res$estimate, 'and a p-value of',res$p.value)
+cat ('There is a postive correlation between number of flights and the number of TSA Claims' )
+
+print (res)
+
+combined_claims_flight_count_plot <- ggscatter(combined_claims_flight_count, x = "count", y = "total_claims",
+          add = "reg.line", conf.int = TRUE,
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Departure Flight Count", ylab = "TSA Claims",
+          color='blue'
+)
+combined_claims_flight_count_plot
+
+
+```
+
+
+Mean departure delay as a predictor of arrival delays at the same airport.
+```{r}
+# Mean Arrival Delays and Mean Departure Delays 
+airport_dep_delays <- totflights %>%
+  group_by(ORIGIN_AIRPORT_ID) %>% summarise(TOT_DEP_DELAY = sum(DEP_DELAY), MEAN_DEP_DELAY = mean(DEP_DELAY)) 
+
+
+airport_arr_delays <- totflights %>%
+  group_by(DEST_AIRPORT_ID) %>% summarise(TOT_ARR_DELAY = sum(ARR_DELAY), MEAN_ARR_DELAY = mean(ARR_DELAY))
+
+airport_dep_arr_delays <- full_join(airport_dep_delays,airport_arr_delays,by = c('ORIGIN_AIRPORT_ID' = 'DEST_AIRPORT_ID'))
+
+airport_dep_arr_delays
+
+res <- cor.test(airport_dep_arr_delays$MEAN_ARR_DELAY, airport_dep_arr_delays$MEAN_DEP_DELAY, method = "pearson")
+print (res)
+
+cat ('With a correlation coefficient of',res$estimate, 'and a p-value of',res$p.value)
+cat ('There is postive correlation between Mean Arrival Delays and Mean Departure Delays' )
+
+ggscatter(airport_dep_arr_delays, x = "MEAN_DEP_DELAY", y = "MEAN_ARR_DELAY",
+          add = "reg.line", conf.int = TRUE,
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Mean Arrival Delay", ylab = "Mean Departure Delay",
+          color='blue'
+)
+
+
+```
+
+
